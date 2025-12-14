@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FitHub - Your Fitness Journey</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f5; margin: 0; padding: 20px; }
+        .main-wrapper { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        .hide-me { display: none !important; }
+        
+        input, select, textarea { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        .btn-primary { background: #4a90e2; color: white; padding: 12px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
+        .btn-secondary { background: #6c757d; }
+        .btn-action { width: auto; padding: 5px 15px; font-size: 0.9em; }
+        
+        .item-card { border-left: 4px solid #4a90e2; background: #f9fbfd; padding: 15px; margin-bottom: 15px; border-radius: 4px; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px; }
+        
+        .price-tag { background: #28a745; color: white; padding: 3px 8px; border-radius: 10px; font-size: 0.85em; }
+        .blur-text { color: transparent; text-shadow: 0 0 8px rgba(0,0,0,0.5); user-select: none; }
+    </style>
+</head>
+<body>
+
+<div class="main-wrapper">
+    <div id="nav_section" class="top-bar hide-me">
+        <h3 id="welcome_msg">Welcome</h3>
+        <button onclick="doLogout()" class="btn-primary btn-action" style="background: #e74c3c;">Sign Out</button>
+    </div>
+
+    <div id="view_auth">
+        <h1 style="text-align: center; color: #333;">FitHub Access</h1>
+        <div style="max-width: 400px; margin: 0 auto;">
+            <input type="text" id="inp_user" placeholder="Name">
+            <input type="password" id="inp_pass" placeholder="Password">
+            <select id="inp_mode">
+                <option value="client">I want to work out (Client)</option>
+                <option value="coach">I am a Coach</option>
+            </select>
+            <button onclick="runAuth('login')" class="btn-primary">Log In</button>
+            <button onclick="runAuth('signup')" class="btn-primary" style="background: #2ecc71; margin-top: 10px;">Create Account</button>
+        </div>
+    </div>
+
+    <div id="view_coach" class="hide-me">
+        <h2>Coach's Corner</h2>
+        <div class="item-card" style="border-left-color: #2ecc71;">
+            <h3>Post a New Workout</h3>
+            <input type="text" id="w_title" placeholder="Workout Name (e.g. 30 Day Shred)">
+            <textarea id="w_info" placeholder="Detailed plan info..."></textarea>
+            <input type="number" id="w_cost" placeholder="Cost ($)">
+            <input type="number" id="w_days" placeholder="Length (Days)">
+            <button onclick="postWorkout()" class="btn-primary">Publish to Library</button>
+        </div>
+        <h3>Your Active Library</h3>
+        <div id="list_coach_items"></div>
+    </div>
+
+    <div id="view_client" class="hide-me">
+        <h2>Your Personal Feed</h2>
+        <p>Updates from coaches you connect with.</p>
+        <div id="list_feed"></div>
+        
+        <h2 style="margin-top: 40px;">Explore Coaches</h2>
+        <div id="list_all_coaches"></div>
+    </div>
+</div>
+
+<script>
+    const SERVER = "http://127.0.0.1:8000";
+    let sessionKey = localStorage.getItem("fithub_key");
+    let accountType = localStorage.getItem("fithub_type");
+
+    if(sessionKey) initApp();
+
+    async function runAuth(action) {
+        const u = document.getElementById("inp_user").value;
+        const p = document.getElementById("inp_pass").value;
+        const m = document.getElementById("inp_mode").value;
+
+        if(!u || !p) return alert("Please fill in all fields");
+
+        if (action === 'signup') {
+            const res = await fetch(`${SERVER}/auth/signup`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username: u, password: p, mode: m })
+            });
+            const dat = await res.json();
+            if(res.ok) alert("Account Ready! Please log in.");
+            else alert("Error: " + dat.detail);
+        } else {
+            const form = new URLSearchParams();
+            form.append('username', u);
+            form.append('password', p);
+            
+            const res = await fetch(`${SERVER}/auth/login`, {
+                method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: form
+            });
+            const dat = await res.json();
+            
+            if (res.ok) {
+                localStorage.setItem("fithub_key", dat.access_token);
+                localStorage.setItem("fithub_type", dat.role);
+                localStorage.setItem("fithub_user", u);
+                sessionKey = dat.access_token;
+                accountType = dat.role;
+                initApp();
+            } else {
+                alert("Login Failed: " + dat.detail);
+            }
+        }
+    }
+
+    function initApp() {
+        document.getElementById("view_auth").classList.add("hide-me");
+        document.getElementById("nav_section").classList.remove("hide-me");
+        document.getElementById("welcome_msg").innerText = `Hi, ${localStorage.getItem("fithub_user")}`;
+
+        if (accountType === 'coach') {
+            document.getElementById("view_coach").classList.remove("hide-me");
+            fetchCoachData();
+        } else {
+            document.getElementById("view_client").classList.remove("hide-me");
+            fetchClientData();
+            fetchCoaches();
+        }
+    }
+
+    function doLogout() {
+        localStorage.clear();
+        location.reload();
+    }
+
+    async function postWorkout() {
+        const title = document.getElementById("w_title").value;
+        const info = document.getElementById("w_info").value;
+        const price = document.getElementById("w_cost").value;
+        const days = document.getElementById("w_days").value;
+
+        await fetch(`${SERVER}/coach/add-workout`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${sessionKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ title, info, price, days })
+        });
+        alert("Workout Published!");
+        fetchCoachData();
+    }
+
+    async function fetchCoachData() {
+        const res = await fetch(`${SERVER}/coach/my-library`, { headers: { "Authorization": `Bearer ${sessionKey}` } });
+        const data = await res.json();
+        document.getElementById("list_coach_items").innerHTML = data.map(i => `
+            <div class="item-card">
+                <strong>${i.workout_name}</strong> <span class="price-tag">$${i.cost}</span><br>
+                <small>${i.program_length} days program</small><br>
+                <p>${i.details}</p>
+            </div>
+        `).join('');
+    }
+
+    async function fetchClientData() {
+        const res = await fetch(`${SERVER}/client/feed`, { headers: { "Authorization": `Bearer ${sessionKey}` } });
+        const data = await res.json();
+        const box = document.getElementById("list_feed");
+        
+        if(data.length === 0) box.innerHTML = "<em>Nothing here yet. Try connecting with coaches!</em>";
+        else box.innerHTML = data.map(i => `
+            <div class="item-card">
+                <h4>${i.title} <span class="price-tag">$${i.price}</span></h4>
+                <small>Coach: ${i.coach}</small>
+                <hr>
+                ${i.unlocked 
+                    ? `<div style="color: green;">✅ Access Granted:<br>${i.info}</div>` 
+                    : `<div class="blur-text">Hidden Content Preview</div>
+                       <button onclick="buyPlan(${i.id})" class="btn-primary btn-action" style="margin-top:10px;">Unlock Now</button>`
+                }
+            </div>
+        `).join('');
+    }
+
+    async function fetchCoaches() {
+        const res = await fetch(`${SERVER}/public/coaches`, { headers: { "Authorization": `Bearer ${sessionKey}` } });
+        const data = await res.json();
+        document.getElementById("list_all_coaches").innerHTML = data.map(c => `
+            <div class="item-card" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>Coach <strong>${c.username}</strong></span>
+                <button onclick="toggleConnection(${c.id})" class="btn-primary btn-action" 
+                    style="background:${c.is_following ? '#7f8c8d' : '#2ecc71'}">
+                    ${c.is_following ? 'Disconnect' : 'Connect'}
+                </button>
+            </div>
+        `).join('');
+    }
+
+    async function toggleConnection(id) {
+        await fetch(`${SERVER}/actions/connect/${id}`, { method: "POST", headers: { "Authorization": `Bearer ${sessionKey}` } });
+        fetchCoaches();
+        fetchClientData();
+    }
+
+    async function buyPlan(id) {
+        await fetch(`${SERVER}/actions/enroll/${id}`, { method: "POST", headers: { "Authorization": `Bearer ${sessionKey}` } });
+        alert("Purchase Complete!");
+        fetchClientData();
+    }
+</script>
+
+</body>
+</html>
